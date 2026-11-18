@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speed Racer - Typing Race Game</title>
+<style>
+  :root {
+    --sky: #bfe4f7;
+    --ink: #1f2a37;
+    --panel: #ffffff;
+    --line: #d6dee6;
+    --good: #1c8a4a;
+    --bad: #d33a3a;
+    --accent: #e8590c;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
+    background: #eef3f7;
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 16px;
+  }
+  main { width: 100%; max-width: 860px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  p.sub { margin: 0 0 14px; color: #4a5a6a; }
+  .hud { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .stat { background: var(--panel); border: 2px solid var(--line); border-radius: 10px; padding: 8px 10px; text-align: center; }
+  .stat b { display: block; font-size: 1.5rem; line-height: 1.2; }
+  .stat span { font-size: .8rem; color: #4a5a6a; }
+  .stage { position: relative; border: 2px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--sky); }
+  canvas { display: block; width: 100%; height: auto; }
+  .textbox {
+    position: absolute; left: 0; right: 0; top: 10px; margin: 0 auto; width: 92%;
+    background: rgba(255,255,255,.95); border: 2px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; text-align: center;
+  }
+  .phrase { font-family: "Courier New", monospace; font-size: clamp(1.1rem, 3.4vw, 1.7rem); letter-spacing: .5px; white-space: pre-wrap; word-break: break-word; }
+  .phrase .done { color: var(--good); }
+  .phrase .cur { background: #ffe58a; border-bottom: 3px solid var(--accent); }
+  .phrase.shake { animation: shake .15s; }
+  .next { margin-top: 4px; font-family: "Courier New", monospace; font-size: .95rem; color: #7a8896; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+  .overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(31,42,55,.55); padding: 12px;
+  }
+  .card { background: var(--panel); border-radius: 14px; padding: 20px 24px; text-align: center; max-width: 440px; width: 100%; }
+  .card h2 { margin: 0 0 8px; font-size: 1.4rem; }
+  .card p { margin: 6px 0; line-height: 1.45; }
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+  .results div { border: 2px solid var(--line); border-radius: 8px; padding: 6px; }
+  .results b { display: block; font-size: 1.4rem; }
+  button {
+    font: inherit; font-weight: 700; background: var(--accent); color: #fff; border: 0;
+    border-radius: 10px; padding: 10px 22px; cursor: pointer;
+  }
+  button:focus-visible { outline: 3px solid #1f2a37; outline-offset: 2px; }
+  .hidden { display: none; }
+  .tips { margin-top: 12px; font-size: .95rem; color: #4a5a6a; }
+  @media (max-width: 520px) { .hud { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Speed Racer</h1>
+  <p class="sub">Type the line above your car. Every correct key moves the car forward.</p>
+
+  <div class="hud" aria-live="off">
+    <div class="stat"><b id="wpm">0</b><span>WPM</span></div>
+    <div class="stat"><b id="acc">100%</b><span>Accuracy</span></div>
+    <div class="stat"><b id="time">45</b><span>Seconds left</span></div>
+    <div class="stat"><b id="dist">0</b><span>Meters (of 600)</span></div>
+  </div>
+
+  <div class="stage">
+    <canvas id="track" width="860" height="360"></canvas>
+    <div class="textbox">
+      <div class="phrase" id="phrase" aria-label="Text to type"></div>
+      <div class="next" id="next"></div>
+    </div>
+    <div class="overlay" id="startOverlay">
+      <div class="card">
+        <h2>Ready to race?</h2>
+        <p>Press any key to start. A race lasts 45 seconds, or until your car reaches 600 meters.</p>
+        <p>A wrong key does not push the car back. It just does not move.</p>
+        <button id="startBtn" type="button">Start race</button>
+      </div>
+    </div>
+    <div class="overlay hidden" id="endOverlay">
+      <div class="card">
+        <h2 id="endTitle">Race over</h2>
+        <div class="results">
+          <div><b id="rWpm">0</b>WPM</div>
+          <div><b id="rAcc">0%</b>Accuracy</div>
+          <div><b id="rDist">0</b>Meters</div>
+          <div><b id="rScore">0</b>Score</div>
+        </div>
+        <p>Score is WPM multiplied by accuracy.</p>
+        <button id="againBtn" type="button">Race again</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="tips">Tip: keep your accuracy high. Fewer mistakes means a better score.</p>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var RACE_SECONDS = 45;
+  var FINISH_METERS = 600;
+  var KEY_IMPULSE = 5;      // speed added per correct key
+  var DRAG = 1.5;           // how fast speed fades each second
+  var BOOST_SECONDS = 1.5;
+  var BOOST_FACTOR = 1.25;
+
+  var PHRASES = [
+    "the sun is bright today", "we run to the red gate", "my dog likes to jump high",
+    "a small bird sat on the fence", "we read a book after lunch", "the cat sleeps on the soft rug",
+    "i can swim in the big pool", "our class plants a tree in spring", "the moon looks round tonight",
+    "she drew a green frog on paper", "a fast car zooms down the road", "we share snacks at the picnic",
+    "the rain makes puddles on the path", "he kicks the ball across the field", "my friend plays a drum with me",
+    "the bus stops near the old school", "we paint a map of the world", "a happy fish swims in the pond",
+    "they build a tall tower with blocks", "the wind moves the paper kite", "i help my mom bake some bread",
+    "the teacher shows us a new game", "a quiet owl sits in the tree", "we walk along the river bank",
+    "the train rolls over the long bridge", "she keeps her pencil in a blue box",
+    "my brother rides his bike to town", "the farmer feeds the sheep at dawn",
+    "we count the stars before bed", "a gentle breeze cools the warm room"
+  ];
+
+  var canvas = document.getElementById("track");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var el = {
+    wpm: document.getElementById("wpm"), acc: document.getElementById("acc"),
+    time: document.getElementById("time"), dist: document.getElementById("dist"),
+    phrase: document.getElementById("phrase"), next: document.getElementById("next"),
+    startOverlay: document.getElementById("startOverlay"), endOverlay: document.getElementById("endOverlay"),
+    startBtn: document.getElementById("startBtn"), againBtn: document.getElementById("againBtn"),
+    rWpm: document.getElementById("rWpm"), rAcc: document.getElementById("rAcc"),
+    rDist: document.getElementById("rDist"), rScore: document.getElementById("rScore"),
+    endTitle: document.getElementById("endTitle")
+  };
+
+  var state = "idle"; // idle | running | done
+  var distance, speed, boost, elapsed, correct, wrong, phrase, pos, nextPhrase, lastTs, wheel;
+
+  function pick(exclude) {
+    var p;
+    do { p = PHRASES[Math.floor(Math.random() * PHRASES.length)]; } while (p === exclude);
+    return p;
+  }
+
+  function reset() {
+    distance = 0; speed = 0; boost = 0; elapsed = 0; correct = 0; wrong = 0; pos = 0; wheel = 0;
+    phrase = pick(); nextPhrase = pick(phrase);
+    renderPhrase(); updateHud();
+  }
+
+  function renderPhrase() {
+    var done = phrase.slice(0, pos);
+    var cur = phrase.charAt(pos) || "";
+    var rest = phrase.slice(pos + 1);
+    el.phrase.innerHTML = "";
+    var a = document.createElement("span"); a.className = "done"; a.textContent = done;
+    var b = document.createElement("span"); b.className = "cur"; b.textContent = cur;
+    var c = document.createElement("span"); c.textContent = rest;
+    el.phrase.appendChild(a); el.phrase.appendChild(b); el.phrase.appendChild(c);
+    el.next.textContent = nextPhrase;
+  }
+
+  function stats() {
+    var minutes = Math.max(elapsed, 0.001) / 60;
+    var wpm = elapsed < 1 ? 0 : Math.round((correct / 5) / minutes);
+    var total = correct + wrong;
+    var acc = total === 0 ? 100 : Math.round((correct / total) * 100);
+    return { wpm: wpm, acc: acc };
+  }
+
+  function updateHud() {
+    var s = stats();
+    el.wpm.textContent = s.wpm;
+    el.acc.textContent = s.acc + "%";
+    el.time.textContent = Math.max(0, Math.ceil(RACE_SECONDS - elapsed));
+    el.dist.textContent = Math.min(FINISH_METERS, Math.floor(distance));
+  }
+
+  function start() {
+    reset();
+    el.startOverlay.classList.add("hidden");
+    el.endOverlay.classList.add("hidden");
+    state = "running";
+    lastTs = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function finish() {
+    state = "done";
+    var s = stats();
+    var d = Math.min(FINISH_METERS, Math.floor(distance));
+    var reached = distance >= FINISH_METERS;
+    el.endTitle.textContent = reached ? "You reached the finish line" : "Time is up";
+    el.rWpm.textContent = s.wpm;
+    el.rAcc.textContent = s.acc + "%";
+    el.rDist.textContent = d;
+    el.rScore.textContent = Math.round(s.wpm * s.acc / 100);
+    el.endOverlay.classList.remove("hidden");
+    el.againBtn.focus();
+    updateHud();
+  }
+
+  function loop(ts) {
+    if (state !== "running") return;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000);
+    lastTs = ts;
+    elapsed += dt;
+    var mult = boost > 0 ? BOOST_FACTOR : 1;
+    if (boost > 0) boost -= dt;
+    speed = Math.max(0, speed - speed * DRAG * dt);
+    distance += speed * mult * dt;
+    wheel += speed * mult * dt * 1.2;
+    draw();
+    updateHud();
+    if (distance >= FINISH_METERS || elapsed >= RACE_SECONDS) { draw(); finish(); return; }
+    requestAnimationFrame(loop);
+  }
+
+  function onKey(e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (state === "idle") { e.preventDefault(); start(); return; }
+    if (state === "done") {
+      if (e.key === "Enter") { e.preventDefault(); start(); }
+      return;
+    }
+    if (e.key.length !== 1) return;
+    e.preventDefault();
+    if (e.key === phrase.charAt(pos)) {
+      correct++;
+      speed += KEY_IMPULSE;
+      pos++;
+      if (pos >= phrase.length) {
+        boost = BOOST_SECONDS;
+        phrase = nextPhrase; nextPhrase = pick(phrase); pos = 0;
+      }
+      renderPhrase();
+    } else {
+      wrong++;
+      el.phrase.classList.remove("shake");
+      void el.phrase.offsetWidth;
+      el.phrase.classList.add("shake");
+    }
+  }
+
+  // ----- drawing -----
+  var SCALE = 6;      // pixels per meter on screen
+  var CAR_X = 190;
+  var ROAD_TOP = 235, ROAD_H = 90;
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // sky
+    ctx.fillStyle = "#bfe4f7"; ctx.fillRect(0, 0, W, ROAD_TOP);
+    // hills (slow parallax)
+    ctx.fillStyle = "#a7d6a0";
+    var off = (distance * 0.8) % 300;
+    for (var i = -1; i < 5; i++) {
+      var hx = i * 300 - off;
+      ctx.beginPath(); ctx.arc(hx + 150, ROAD_TOP, 110, Math.PI, 0); ctx.fill();
+    }
+    // grass strip + road
+    ctx.fillStyle = "#6cb86a"; ctx.fillRect(0, ROAD_TOP - 8, W, 8);
+    ctx.fillStyle = "#4b5563"; ctx.fillRect(0, ROAD_TOP, W, ROAD_H);
+    ctx.fillStyle = "#6cb86a"; ctx.fillRect(0, ROAD_TOP + ROAD_H, W, H - ROAD_TOP - ROAD_H);
+    // center dashes
+    ctx.fillStyle = "#f5f5f5";
+    var dashOff = (distance * SCALE) % 80;
+    for (var x = -80; x < W + 80; x += 80) {
+      ctx.fillRect(x - dashOff, ROAD_TOP + ROAD_H / 2 - 3, 44, 6);
+    }
+    // finish line
+    var fx = CAR_X + (FINISH_METERS - distance) * SCALE + 70;
+    if (fx > -40 && fx < W + 40) {
+      for (var r = 0; r < 6; r++) for (var c = 0; c < 2; c++) {
+        ctx.fillStyle = (r + c) % 2 ? "#fff" : "#111";
+        ctx.fillRect(fx + c * 14, ROAD_TOP + r * (ROAD_H / 6), 14, ROAD_H / 6);
+      }
+    }
+    // progress bar
+    ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.fillRect(20, H - 26, W - 40, 10);
+    ctx.fillStyle = "#e8590c"; ctx.fillRect(20, H - 26, (W - 40) * Math.min(1, distance / FINISH_METERS), 10);
+    drawCar(CAR_X, ROAD_TOP + 22);
+  }
+
+  function drawCar(x, y) {
+    var bounce = state === "running" ? Math.sin(wheel * 3) * (speed > 0.5 ? 1.2 : 0) : 0;
+    y += bounce;
+    // body
+    ctx.fillStyle = boost > 0 ? "#f59f00" : "#d9480f";
+    ctx.beginPath(); ctx.roundRect(x, y + 14, 120, 30, 8); ctx.fill();
+    ctx.fillStyle = boost > 0 ? "#fcc419" : "#f76707";
+    ctx.beginPath(); ctx.roundRect(x + 28, y - 8, 62, 26, 8); ctx.fill();
+    // window
+    ctx.fillStyle = "#d0ebff";
+    ctx.beginPath(); ctx.roundRect(x + 36, y - 2, 20, 16, 3); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(x + 60, y - 2, 20, 16, 3); ctx.fill();
+    // lights
+    ctx.fillStyle = "#fff3bf"; ctx.fillRect(x + 114, y + 20, 8, 8);
+    // wheels
+    [x + 26, x + 94].forEach(function (wx) {
+      var wy = y + 46;
+      ctx.fillStyle = "#212529"; ctx.beginPath(); ctx.arc(wx, wy, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#adb5bd"; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(wx + Math.cos(wheel) * 9, wy + Math.sin(wheel) * 9);
+      ctx.lineTo(wx - Math.cos(wheel) * 9, wy - Math.sin(wheel) * 9);
+      ctx.stroke();
+    });
+    // speed lines
+    if (speed > 6) {
+      ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 3;
+      for (var i = 0; i < 3; i++) {
+        ctx.beginPath(); ctx.moveTo(x - 10 - i * 16, y + 18 + i * 10);
+        ctx.lineTo(x - 40 - i * 16, y + 18 + i * 10); ctx.stroke();
+      }
+    }
+  }
+
+  // roundRect fallback for older browsers
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h) { this.rect(x, y, w, h); };
+  }
+
+  document.addEventListener("keydown", onKey);
+  el.startBtn.addEventListener("click", function () { if (state === "idle") start(); });
+  el.againBtn.addEventListener("click", start);
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>
